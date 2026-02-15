@@ -5,11 +5,13 @@
 #include <stdio.h>
 #include <time.h>
 #include <errno.h>
+struct rlimit {
+	unsigned long rlim_cur;
+	unsigned long rlim_max;
+};
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
-#include "channel.h"
 
 /*
  * Minimal stubs for missing libc/Dropbear symbols on ESP-IDF.
@@ -137,24 +139,6 @@ __attribute__((weak)) int getgroups(int size, gid_t list[])
 __attribute__((weak)) void disallow_core(void)
 {
 }
-
-__attribute__((weak)) void svr_chansess_checksignal(void)
-{
-}
-
-__attribute__((weak)) void svr_chansessinitialise(void)
-{
-}
-
-__attribute__((weak)) const struct ChanType svrchansess = {
-	"session",
-	NULL,
-	NULL,
-	NULL,
-	NULL,
-	NULL
-};
-
 
 int nanosleep(const struct timespec *req, struct timespec *rem)
 {

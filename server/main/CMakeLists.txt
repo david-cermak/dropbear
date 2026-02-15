@@ -259,7 +259,7 @@ set(DROPBEAR_SRCS
     ${DROPBEAR_DIR}/src/svr-tcpfwd.c
     ${DROPBEAR_DIR}/src/svr-authpam.c)
 
-idf_component_register(SRCS "server.c" ${DROPBEAR_SRCS} "../../port/idf_stubs.c"
+idf_component_register(SRCS "server.c" "esp_shell.c" ${DROPBEAR_SRCS} "../../port/idf_stubs.c"
                     ${TOMLIBMATH_SRCS} 
                     ${TOMCRYPT_SRCS}
                     INCLUDE_DIRS "." ${DROPBEAR_DIR} ${PORT_DIR} ${TOMCRYPT_INCLUDE_DIR} ${DROPBEAR_INCLUDE_DIR}
