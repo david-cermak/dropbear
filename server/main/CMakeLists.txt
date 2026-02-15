@@ -244,7 +244,7 @@ set(DROPBEAR_SRCS
     ${DROPBEAR_DIR}/src/mlkem768.c
     # SVROBJS (server-specific objects)
     ${DROPBEAR_DIR}/src/svr-kex.c
-    # ${DROPBEAR_DIR}/src/svr-auth.c
+    ${DROPBEAR_DIR}/src/svr-auth.c
     # ${DROPBEAR_DIR}/src/sshpty.c
     ${DROPBEAR_DIR}/src/svr-authpasswd.c
     ${DROPBEAR_DIR}/src/svr-authpubkey.c
