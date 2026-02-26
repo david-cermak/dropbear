@@ -165,3 +165,13 @@ int setrlimit(int resource, const struct rlimit *rlim)
 {
 	return 0;
 }
+
+void svr_chansessinitialise(void)
+{
+	/* nothing needed on ESP-IDF */
+}
+
+void svr_chansess_checksignal(void)
+{
+	/* no child processes on ESP-IDF */
+}

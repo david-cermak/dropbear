@@ -1,5 +1,7 @@
 #pragma once
 #include "stubs.h"
+#include "gai_strerror.h"
+
 #define LOG_NOTICE 5
 #define LOG_INFO 4
 #define LOG_WARNING 3

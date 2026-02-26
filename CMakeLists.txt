@@ -183,13 +183,13 @@ bn_s_mp_mul_digs.c bn_s_mp_mul_digs_fast.c bn_s_mp_mul_high_digs.c bn_s_mp_mul_h
 bn_s_mp_prime_is_divisible.c bn_s_mp_rand_jenkins.c bn_s_mp_rand_platform.c bn_s_mp_reverse.c 
 bn_s_mp_sqr.c bn_s_mp_sqr_fast.c bn_s_mp_sub.c bn_s_mp_toom_mul.c bn_s_mp_toom_sqr.c)
 
-set(DROPBEAR_DIR ${CMAKE_SOURCE_DIR}/../dropbear)
+set(DROPBEAR_DIR dropbear)
 list(TRANSFORM TOMLIBMATH_SRCS PREPEND "${DROPBEAR_DIR}/libtommath/")
 list(TRANSFORM TOMCRYPT_SRCS PREPEND "${DROPBEAR_DIR}/libtomcrypt/")
-set(DROPBEAR_INCLUDE_DIR ${DROPBEAR_DIR}/../dropbear/src)
-set(TOMCRYPT_INCLUDE_DIR ${DROPBEAR_DIR}/../dropbear/libtomcrypt/src/headers)
+set(DROPBEAR_INCLUDE_DIR ${DROPBEAR_DIR}/src)
+set(TOMCRYPT_INCLUDE_DIR ${DROPBEAR_DIR}/libtomcrypt/src/headers)
 set(TOMCRYPT_INCLUDE_DIR2 ${DROPBEAR_DIR}/libtommath)
-set(PORT_DIR ${CMAKE_SOURCE_DIR}/../port)
+set(PORT_DIR port)
 set(DROPBEAR_SRCS
     # COMMONOBJS 
     ${DROPBEAR_DIR}/src/dbutil.c
@@ -259,7 +259,13 @@ set(DROPBEAR_SRCS
     ${DROPBEAR_DIR}/src/svr-tcpfwd.c
     ${DROPBEAR_DIR}/src/svr-authpam.c)
 
-idf_component_register(SRCS "server.c" "esp_shell.c" ${DROPBEAR_SRCS} "../../port/idf_stubs.c"
+MESSAGE(STATUS "DROPBEAR_DIR: ${DROPBEAR_DIR}")
+MESSAGE(STATUS "PORT_DIR: ${PORT_DIR}")
+MESSAGE(STATUS "TOMCRYPT_INCLUDE_DIR: ${TOMCRYPT_INCLUDE_DIR}")
+MESSAGE(STATUS "DROPBEAR_INCLUDE_DIR: ${DROPBEAR_INCLUDE_DIR}")
+MESSAGE(STATUS "TOMCRYPT_INCLUDE_DIR2: ${TOMCRYPT_INCLUDE_DIR2}")
+
+idf_component_register(SRCS ${DROPBEAR_SRCS} "port/idf_stubs.c"
                     ${TOMLIBMATH_SRCS} 
                     ${TOMCRYPT_SRCS}
                     INCLUDE_DIRS "." ${DROPBEAR_DIR} ${PORT_DIR} ${TOMCRYPT_INCLUDE_DIR} ${DROPBEAR_INCLUDE_DIR}
@@ -267,6 +273,7 @@ idf_component_register(SRCS "server.c" "esp_shell.c" ${DROPBEAR_SRCS} "../../por
 
 set_source_files_properties(${TOMCRYPT_SRCS} PROPERTIES COMPILE_DEFINITIONS LTC_SOURCE)
 
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-u svrchansess")
 
 set_source_files_properties(${DROPBEAR_DIR}/src/ed25519.c PROPERTIES COMPILE_OPTIONS "-Wno-pointer-sign")
 set_source_files_properties(${DROPBEAR_DIR}/src/svr-kex.c PROPERTIES COMPILE_OPTIONS "-Wno-pointer-sign")
