@@ -1,10 +1,19 @@
 #include <stdio.h>
+#include <inttypes.h>
 #include "nvs_flash.h"
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_log.h"
 #include "protocol_examples_common.h"
 #include "includes.h"
+#include "mem_stats.h"
+
+#if ENABLE_MEMORY_STATS
+#include "esp_system.h"
+#include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#endif
 #include "dbutil.h"
 #include "runopts.h"
 #include "session.h"
@@ -15,6 +24,26 @@
 
 
 #define DEFAULT_PORT "2222"
+
+#if ENABLE_MEMORY_STATS
+static const char *TAG = "dropbear_server";
+
+/**
+ * Print heap memory statistics to the console (same as libssh example).
+ */
+void print_mem_stats(const char *label)
+{
+	ESP_LOGI(TAG, "---- Memory Stats [%s] ----", label);
+	ESP_LOGI(TAG, "  Free heap:          %" PRIu32 " bytes", esp_get_free_heap_size());
+	ESP_LOGI(TAG, "  Min free heap ever: %" PRIu32 " bytes", esp_get_minimum_free_heap_size());
+	ESP_LOGI(TAG, "  Free internal:      %zu bytes",
+		heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+	ESP_LOGI(TAG, "  Free DRAM:          %zu bytes",
+		heap_caps_get_free_size(MALLOC_CAP_8BIT));
+	ESP_LOGI(TAG, "  Main task stack HWM: %u words free",
+		(unsigned)uxTaskGetStackHighWaterMark(NULL));
+}
+#endif
 
 /*
  * Hardcoded ed25519 host key in Dropbear's native binary format.
@@ -132,7 +161,14 @@ void app_main(void)
 	size_t listensockcount;
 
 	init_idf();
+
+#if ENABLE_MEMORY_STATS
+	print_mem_stats("before dropbear_setup");
+#endif
 	dropbear_setup(DEFAULT_PORT);
+#if ENABLE_MEMORY_STATS
+	print_mem_stats("after dropbear_setup");
+#endif
 
 	listensockcount = listen_sockets(listensocks, MAX_LISTEN_ADDR, &maxfd);
 	if (listensockcount == 0) {
@@ -160,6 +196,10 @@ void app_main(void)
 			remote_port ? remote_port : "?");
 		m_free(remote_host);
 		m_free(remote_port);
+
+#if ENABLE_MEMORY_STATS
+		print_mem_stats("after session accepted");
+#endif
 
 		seedrandom();
 		/* svr_session never returns. */

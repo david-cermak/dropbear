@@ -19,6 +19,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_system.h"
+#include "esp_log.h"
+#include "mem_stats.h"
+
+#if ENABLE_MEMORY_STATS
+#include "esp_heap_caps.h"
+#include <inttypes.h>
+#include <stdlib.h>
+#endif
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -89,6 +97,68 @@ static void shell_write(int fd, const char *s)
 	}
 }
 
+#if ENABLE_MEMORY_STATS
+static const char *TAG = "esp_shell";
+
+/**
+ * Print stack high-water marks for all running tasks and heap summary
+ * (same as libssh example). Writes to both ESP log and the shell fd.
+ */
+static void print_all_task_stats(int fd)
+{
+	UBaseType_t num_tasks = uxTaskGetNumberOfTasks();
+	TaskStatus_t *task_array = malloc(num_tasks * sizeof(TaskStatus_t));
+	if (task_array == NULL) {
+		shell_write(fd, "Failed to allocate task status array\r\n");
+		return;
+	}
+
+	UBaseType_t actual = uxTaskGetSystemState(task_array, num_tasks, NULL);
+	char line[128];
+	int len;
+
+	len = snprintf(line, sizeof(line),
+		"\r\n%-20s %5s %10s %5s\r\n", "Task", "State", "Stack HWM", "Prio");
+	ESP_LOGI(TAG, "%s", line);
+	shell_write(fd, line);
+
+	len = snprintf(line, sizeof(line),
+		"%-20s %5s %10s %5s\r\n", "----", "-----", "---------", "----");
+	ESP_LOGI(TAG, "%s", line);
+	shell_write(fd, line);
+
+	for (UBaseType_t i = 0; i < actual; i++) {
+		const char *state;
+		switch (task_array[i].eCurrentState) {
+		case eRunning:   state = "RUN";   break;
+		case eReady:     state = "RDY";   break;
+		case eBlocked:   state = "BLK";   break;
+		case eSuspended: state = "SUS";   break;
+		case eDeleted:   state = "DEL";   break;
+		default:         state = "???";   break;
+		}
+		len = snprintf(line, sizeof(line),
+			"%-20s %5s %10u %5u\r\n",
+			task_array[i].pcTaskName,
+			state,
+			(unsigned)task_array[i].usStackHighWaterMark,
+			(unsigned)task_array[i].uxCurrentPriority);
+		ESP_LOGI(TAG, "%s", line);
+		shell_write(fd, line);
+	}
+
+	len = snprintf(line, sizeof(line),
+		"\r\nFree heap: %" PRIu32 " | Min ever: %" PRIu32 " | Internal: %zu\r\n",
+		esp_get_free_heap_size(),
+		esp_get_minimum_free_heap_size(),
+		heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+	ESP_LOGI(TAG, "%s", line);
+	shell_write(fd, line);
+
+	free(task_array);
+}
+#endif
+
 /* ------------------------------------------------------------------ */
 /*  Shell task – runs on its own FreeRTOS thread                      */
 /* ------------------------------------------------------------------ */
@@ -139,12 +209,19 @@ static void shell_task(void *arg)
 							"Free heap: %lu bytes\r\n",
 							(unsigned long)esp_get_free_heap_size());
 						shell_write(fd, tmp);
+#if ENABLE_MEMORY_STATS
+					} else if (strcmp(cmd, "stats") == 0) {
+						print_all_task_stats(fd);
+#endif
 					} else if (strcmp(cmd, "help") == 0) {
 						shell_write(fd,
 							"Available commands:\r\n"
 							"  hello   - print greeting\r\n"
 							"  uptime  - show uptime in ms\r\n"
 							"  heap    - show free heap\r\n"
+#if ENABLE_MEMORY_STATS
+							"  stats   - show task and heap stats\r\n"
+#endif
 							"  reset   - restart ESP32\r\n"
 							"  exit    - close session\r\n"
 							"  help    - this message\r\n");
@@ -256,6 +333,9 @@ static void esp_chansessionrequest(struct Channel *channel)
 		}
 
 		dropbear_log(LOG_INFO, "ESP32 shell session started");
+#if ENABLE_MEMORY_STATS
+		print_mem_stats("session ready (auth+channel)");
+#endif
 		ret = DROPBEAR_SUCCESS;
 
 	} else if (strcmp(type, "window-change") == 0) {
