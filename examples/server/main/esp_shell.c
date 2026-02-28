@@ -88,14 +88,13 @@ static void print_all_task_stats(int fd)
 
 	UBaseType_t actual = uxTaskGetSystemState(task_array, num_tasks, NULL);
 	char line[128];
-	int len;
 
-	len = snprintf(line, sizeof(line),
+	(void)snprintf(line, sizeof(line),
 		"\r\n%-20s %5s %10s %5s\r\n", "Task", "State", "Stack HWM", "Prio");
 	ESP_LOGI(TAG, "%s", line);
 	shell_write(fd, line);
 
-	len = snprintf(line, sizeof(line),
+	(void)snprintf(line, sizeof(line),
 		"%-20s %5s %10s %5s\r\n", "----", "-----", "---------", "----");
 	ESP_LOGI(TAG, "%s", line);
 	shell_write(fd, line);
@@ -110,7 +109,7 @@ static void print_all_task_stats(int fd)
 		case eDeleted:   state = "DEL";   break;
 		default:         state = "???";   break;
 		}
-		len = snprintf(line, sizeof(line),
+		(void)snprintf(line, sizeof(line),
 			"%-20s %5s %10u %5u\r\n",
 			task_array[i].pcTaskName,
 			state,
@@ -120,7 +119,7 @@ static void print_all_task_stats(int fd)
 		shell_write(fd, line);
 	}
 
-	len = snprintf(line, sizeof(line),
+	(void)snprintf(line, sizeof(line),
 		"\r\nFree heap: %" PRIu32 " | Min ever: %" PRIu32 " | Internal: %zu\r\n",
 		esp_get_free_heap_size(),
 		esp_get_minimum_free_heap_size(),
