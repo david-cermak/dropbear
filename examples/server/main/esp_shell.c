@@ -31,9 +31,10 @@
 
 #include <sys/socket.h>
 #include <sys/select.h>
-#include <netinet/in.h>
 #include <fcntl.h>
 #include <errno.h>
+
+#include "socketpair.h"
 
 /* ------------------------------------------------------------------ */
 /*  Per-session state (stored in channel->typedata)                   */
@@ -48,43 +49,11 @@ struct EspShellSess {
 };
 
 /* ------------------------------------------------------------------ */
-/*  TCP-loopback socket pair (works on any lwIP build)                */
+/*  Socket pair (from espressif/sock_utils)                            */
 /* ------------------------------------------------------------------ */
 static int make_socket_pair(int sv[2])
 {
-	int lfd = -1, cfd = -1, afd = -1;
-	struct sockaddr_in addr;
-	socklen_t len = sizeof(addr);
-
-	lfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (lfd < 0) goto fail;
-
-	memset(&addr, 0, sizeof(addr));
-	addr.sin_family      = AF_INET;
-	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-	addr.sin_port        = 0;          /* kernel picks a free port */
-
-	if (bind(lfd, (struct sockaddr *)&addr, sizeof(addr)) < 0) goto fail;
-	if (listen(lfd, 1) < 0) goto fail;
-	if (getsockname(lfd, (struct sockaddr *)&addr, &len) < 0) goto fail;
-
-	cfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (cfd < 0) goto fail;
-	if (connect(cfd, (struct sockaddr *)&addr, sizeof(addr)) < 0) goto fail;
-
-	afd = accept(lfd, NULL, NULL);
-	if (afd < 0) goto fail;
-
-	close(lfd);
-	sv[0] = cfd;   /* one end  */
-	sv[1] = afd;   /* other end */
-	return 0;
-
-fail:
-	if (lfd >= 0) close(lfd);
-	if (cfd >= 0) close(cfd);
-	if (afd >= 0) close(afd);
-	return -1;
+	return socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
 }
 
 /* ------------------------------------------------------------------ */
