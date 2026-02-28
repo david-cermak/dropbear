@@ -1,7 +1,7 @@
 #ifndef MAIN_MEM_STATS_H
 #define MAIN_MEM_STATS_H
 
-#define ENABLE_MEMORY_STATS 0
+#define ENABLE_MEMORY_STATS 1
 // need to enable freertos stats for this to work
 // FREERTOS_USE_TRACE_FACILITY=y
 // FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y

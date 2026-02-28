@@ -3,6 +3,7 @@
  *
  * Instead of fork()+exec() a real shell, this provides a simple interactive
  * command loop over the SSH channel (similar to the libssh example).
+ * Runs in the main task context (no separate FreeRTOS task).
  *
  * Supported commands: help, hello, uptime, heap, reset, exit
  *
@@ -29,6 +30,7 @@
 #endif
 
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <netinet/in.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -38,9 +40,11 @@
 /* ------------------------------------------------------------------ */
 struct EspShellSess {
 	int  chan_fd;           /* Dropbear side of the socket pair    */
-	int  shell_fd;          /* shell-task side of the socket pair  */
-	TaskHandle_t task;
-	volatile int done;      /* set to 1 when the shell task exits  */
+	int  shell_fd;          /* shell side (read client input here) */
+	int  done;              /* set to 1 when shell should close    */
+	int  banner_sent;       /* 1 after welcome message              */
+	char cmd[128];
+	int  cmd_len;
 };
 
 /* ------------------------------------------------------------------ */
@@ -160,102 +164,120 @@ static void print_all_task_stats(int fd)
 #endif
 
 /* ------------------------------------------------------------------ */
-/*  Shell task – runs on its own FreeRTOS thread                      */
+/*  Shell I/O – runs in main task when shell_fd is readable             */
 /* ------------------------------------------------------------------ */
-static void shell_task(void *arg)
+static void shell_process_input(struct EspShellSess *sess)
 {
-	struct EspShellSess *sess = (struct EspShellSess *)arg;
 	int fd = sess->shell_fd;
 	char buf[256];
-	char cmd[128];
-	int  cmd_len = 0;
+	int n, i;
 
-	shell_write(fd, "\r\n=== ESP32 Dropbear Shell ===\r\n");
-	shell_write(fd, "Type 'help' for available commands.\r\n");
-	shell_write(fd, "esp32> ");
+	if (fd < 0 || sess->done) return;
 
-	while (!sess->done) {
-		int n = read(fd, buf, sizeof(buf) - 1);
-		if (n <= 0) {
-			break;
-		}
-
-		for (int i = 0; i < n; i++) {
-			unsigned char c = (unsigned char)buf[i];
-
-			if (c == '\r' || c == '\n') {
-				shell_write(fd, "\r\n");
-				cmd[cmd_len] = '\0';
-
-				if (cmd_len > 0) {
-					if (strcmp(cmd, "exit") == 0) {
-						shell_write(fd, "Goodbye!\r\n");
-						goto done;
-					} else if (strcmp(cmd, "reset") == 0) {
-						shell_write(fd, "Resetting ESP32...\r\n");
-						vTaskDelay(pdMS_TO_TICKS(100));
-						esp_restart();
-					} else if (strcmp(cmd, "hello") == 0) {
-						shell_write(fd, "Hello, world!\r\n");
-					} else if (strcmp(cmd, "uptime") == 0) {
-						char tmp[64];
-						snprintf(tmp, sizeof(tmp), "Uptime: %lu ms\r\n",
-							(unsigned long)(xTaskGetTickCount()
-								* portTICK_PERIOD_MS));
-						shell_write(fd, tmp);
-					} else if (strcmp(cmd, "heap") == 0) {
-						char tmp[64];
-						snprintf(tmp, sizeof(tmp),
-							"Free heap: %lu bytes\r\n",
-							(unsigned long)esp_get_free_heap_size());
-						shell_write(fd, tmp);
-#if ENABLE_MEMORY_STATS
-					} else if (strcmp(cmd, "stats") == 0) {
-						print_all_task_stats(fd);
-#endif
-					} else if (strcmp(cmd, "help") == 0) {
-						shell_write(fd,
-							"Available commands:\r\n"
-							"  hello   - print greeting\r\n"
-							"  uptime  - show uptime in ms\r\n"
-							"  heap    - show free heap\r\n"
-#if ENABLE_MEMORY_STATS
-							"  stats   - show task and heap stats\r\n"
-#endif
-							"  reset   - restart ESP32\r\n"
-							"  exit    - close session\r\n"
-							"  help    - this message\r\n");
-					} else {
-						shell_write(fd, "Unknown command: ");
-						shell_write(fd, cmd);
-						shell_write(fd, "\r\nType 'help' for available commands.\r\n");
-					}
-				}
-
-				cmd_len = 0;
-				shell_write(fd, "esp32> ");
-			} else if (c == 0x7f || c == '\b') {
-				if (cmd_len > 0) {
-					cmd_len--;
-					shell_write(fd, "\b \b");
-				}
-			} else if (c == 0x03) {
-				/* Ctrl-C */
-				shell_write(fd, "^C\r\n");
-				cmd_len = 0;
-				shell_write(fd, "esp32> ");
-			} else if (c >= 0x20 && cmd_len < (int)sizeof(cmd) - 1) {
-				cmd[cmd_len++] = (char)c;
-				write(fd, &c, 1);
-			}
-		}
+	/* Send banner once */
+	if (!sess->banner_sent) {
+		shell_write(fd, "\r\n=== ESP32 Dropbear Shell ===\r\n");
+		shell_write(fd, "Type 'help' for available commands.\r\n");
+		shell_write(fd, "esp32> ");
+		sess->banner_sent = 1;
 	}
 
-done:
-	sess->done = 1;
-	close(fd);
-	sess->shell_fd = -1;
-	vTaskDelete(NULL);
+	n = read(fd, buf, sizeof(buf) - 1);
+	if (n <= 0) {
+		if (n == 0 || (errno != EAGAIN && errno != EWOULDBLOCK))
+			sess->done = 1;
+		return;
+	}
+
+	for (i = 0; i < n; i++) {
+		unsigned char c = (unsigned char)buf[i];
+
+		if (c == '\r' || c == '\n') {
+			shell_write(fd, "\r\n");
+			sess->cmd[sess->cmd_len] = '\0';
+
+			if (sess->cmd_len > 0) {
+				if (strcmp(sess->cmd, "exit") == 0) {
+					shell_write(fd, "Goodbye!\r\n");
+					sess->done = 1;
+					return;
+				} else if (strcmp(sess->cmd, "reset") == 0) {
+					shell_write(fd, "Resetting ESP32...\r\n");
+					vTaskDelay(pdMS_TO_TICKS(100));
+					esp_restart();
+				} else if (strcmp(sess->cmd, "hello") == 0) {
+					shell_write(fd, "Hello, world!\r\n");
+				} else if (strcmp(sess->cmd, "uptime") == 0) {
+					char tmp[64];
+					snprintf(tmp, sizeof(tmp), "Uptime: %lu ms\r\n",
+						(unsigned long)(xTaskGetTickCount()
+							* portTICK_PERIOD_MS));
+					shell_write(fd, tmp);
+				} else if (strcmp(sess->cmd, "heap") == 0) {
+					char tmp[64];
+					snprintf(tmp, sizeof(tmp),
+						"Free heap: %lu bytes\r\n",
+						(unsigned long)esp_get_free_heap_size());
+					shell_write(fd, tmp);
+#if ENABLE_MEMORY_STATS
+				} else if (strcmp(sess->cmd, "stats") == 0) {
+					print_all_task_stats(fd);
+#endif
+				} else if (strcmp(sess->cmd, "help") == 0) {
+					shell_write(fd,
+						"Available commands:\r\n"
+						"  hello   - print greeting\r\n"
+						"  uptime  - show uptime in ms\r\n"
+						"  heap    - show free heap\r\n"
+#if ENABLE_MEMORY_STATS
+						"  stats   - show task and heap stats\r\n"
+#endif
+						"  reset   - restart ESP32\r\n"
+						"  exit    - close session\r\n"
+						"  help    - this message\r\n");
+				} else {
+					shell_write(fd, "Unknown command: ");
+					shell_write(fd, sess->cmd);
+					shell_write(fd, "\r\nType 'help' for available commands.\r\n");
+				}
+			}
+
+			sess->cmd_len = 0;
+			shell_write(fd, "esp32> ");
+		} else if (c == 0x7f || c == '\b') {
+			if (sess->cmd_len > 0) {
+				sess->cmd_len--;
+				shell_write(fd, "\b \b");
+			}
+		} else if (c == 0x03) {
+			shell_write(fd, "^C\r\n");
+			sess->cmd_len = 0;
+			shell_write(fd, "esp32> ");
+		} else if (c >= 0x20 && sess->cmd_len < (int)sizeof(sess->cmd) - 1) {
+			sess->cmd[sess->cmd_len++] = (char)c;
+			write(fd, &c, 1);
+		}
+	}
+}
+
+static void esp_set_extra_fds(struct Channel *channel, fd_set *readfds, fd_set *writefds)
+{
+	struct EspShellSess *sess = (struct EspShellSess *)channel->typedata;
+	(void)writefds;
+	if (sess && sess->shell_fd >= 0 && !sess->done) {
+		FD_SET(sess->shell_fd, readfds);
+		ses.maxfd = MAX(ses.maxfd, sess->shell_fd);
+	}
+}
+
+static void esp_handle_extra_io(struct Channel *channel,
+	const fd_set *readfds, const fd_set *writefds)
+{
+	struct EspShellSess *sess = (struct EspShellSess *)channel->typedata;
+	(void)writefds;
+	if (sess && sess->shell_fd >= 0 && FD_ISSET(sess->shell_fd, readfds)) {
+		shell_process_input(sess);
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -267,10 +289,11 @@ static int esp_newchansess(struct Channel *channel)
 	struct EspShellSess *sess;
 
 	sess = (struct EspShellSess *)m_malloc(sizeof(*sess));
-	sess->chan_fd  = -1;
-	sess->shell_fd = -1;
-	sess->task     = NULL;
-	sess->done     = 0;
+	sess->chan_fd     = -1;
+	sess->shell_fd    = -1;
+	sess->done        = 0;
+	sess->banner_sent = 0;
+	sess->cmd_len     = 0;
 
 	channel->typedata = sess;
 	channel->prio = DROPBEAR_PRIO_LOWDELAY;
@@ -300,7 +323,7 @@ static void esp_chansessionrequest(struct Channel *channel)
 
 	} else if (strcmp(type, "shell") == 0 || strcmp(type, "exec") == 0) {
 
-		if (sess->task != NULL) {
+		if (sess->shell_fd >= 0) {
 			dropbear_log(LOG_WARNING, "Shell already running");
 			goto out;
 		}
@@ -314,23 +337,15 @@ static void esp_chansessionrequest(struct Channel *channel)
 		sess->chan_fd  = sv[0];
 		sess->shell_fd = sv[1];
 
-		channel->readfd  = sv[0];
-		channel->writefd = sv[0];
+		channel->readfd   = sv[0];
+		channel->writefd  = sv[0];
 		channel->bidir_fd = 1;
 
 		setnonblocking(sv[0]);
+		setnonblocking(sv[1]);
 
 		ses.maxfd = MAX(ses.maxfd, sv[0]);
-
-		if (xTaskCreate(shell_task, "esp_shell", 4096, sess,
-				5, &sess->task) != pdPASS) {
-			close(sv[0]);
-			close(sv[1]);
-			sess->chan_fd  = -1;
-			sess->shell_fd = -1;
-			dropbear_log(LOG_WARNING, "Failed to create shell task");
-			goto out;
-		}
+		ses.maxfd = MAX(ses.maxfd, sv[1]);
 
 		dropbear_log(LOG_INFO, "ESP32 shell session started");
 #if ENABLE_MEMORY_STATS
@@ -380,12 +395,6 @@ static void esp_cleanupchansess(const struct Channel *channel)
 		sess->shell_fd = -1;
 	}
 
-	/* Give the task a moment to notice and exit */
-	if (sess->task) {
-		vTaskDelay(pdMS_TO_TICKS(50));
-		sess->task = NULL;
-	}
-
 	m_free(sess);
 }
 
@@ -399,6 +408,8 @@ const struct ChanType svrchansess = {
 	esp_sesscheckclose,
 	esp_chansessionrequest,
 	esp_closechansess,
-	esp_cleanupchansess
+	esp_cleanupchansess,
+	esp_set_extra_fds,
+	esp_handle_extra_io
 };
 

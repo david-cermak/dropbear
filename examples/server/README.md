@@ -2,7 +2,7 @@
 
 Minimal SSH server example using Dropbear on ESP-IDF, with an embedded shell.
 
-For detailed flash and runtime memory footprint, see [footprint.md](footprint.md). For a comparison with libssh, see [comparison_with_libssh.md](comparison_with_libssh.md).
+For detailed flash and runtime memory footprint, see [footprint.md](footprint.md). For a comparison with libssh, see [comparison_with_libssh.md](comparison_with_libssh.md) or [comparison_with_libssh.html](comparison_with_libssh.html) (visual charts).
 
 ## Memory usage
 
@@ -10,18 +10,18 @@ Typical heap usage on ESP32 (from memory stats at key points):
 
 | Stage | Free heap | Heap used (delta) | Main task stack HWM |
 |-------|-----------|--------------------|---------------------|
-| **before dropbear_setup** (WiFi connected) | ~266 KB | — | ~5.5K words free |
-| **after dropbear_setup** (crypto, hostkey) | ~266 KB | ~0.4 KB | ~5.3K words free |
-| **after session accepted** | ~265 KB | ~1 KB total | ~5.3K words free |
-| **session ready** (auth + channel + shell) | ~234 KB | ~32 KB total | ~3.9K words free |
+| **before dropbear_setup** (WiFi connected) | ~264 KB | — | ~5.5K words free |
+| **after dropbear_setup** (crypto, hostkey) | ~263 KB | ~0.4 KB | ~5.3K words free |
+| **after session accepted** | ~262 KB | ~1.4 KB total | ~5.3K words free |
+| **session ready** (auth + channel + shell) | ~240 KB | ~24 KB total | ~3.9K words free |
 
 ### Summary
 
 - **Dropbear setup (~0.4 KB):** crypto init and hostkey loading.
-- **Session accept (~1 KB):** per-connection session state.
-- **Session ready (~30 KB):** full SSH handshake, auth, channel setup, and shell task (4 KB stack).
+- **Session accept (~1.4 KB):** per-connection session state.
+- **Session ready (~24 KB):** full SSH handshake, auth, channel setup, and shell (runs in main task).
 
-The largest allocation occurs when the session becomes ready (auth + channel + shell). Plan for ~32 KB additional heap per active SSH session.
+The largest allocation occurs when the session becomes ready (auth + channel + shell). Plan for ~24 KB additional heap per active SSH session.
 
 ## Build and run
 
